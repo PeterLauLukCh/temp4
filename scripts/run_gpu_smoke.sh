@@ -3,8 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${ROOT}/.venv/bin/python"
+SMOKE_ACTORS="${SMOKE_ACTORS:-1}"
+SMOKE_SIMULATIONS="${SMOKE_SIMULATIONS:-4}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-RUN_NAME="gpu-smoke-${STAMP}"
+RUN_NAME="gpu-smoke-a${SMOKE_ACTORS}-s${SMOKE_SIMULATIONS}-${STAMP}"
 RUN_PARENT="${ROOT}/runs/connect3"
 RUN_DIR="${RUN_PARENT}/${RUN_NAME}"
 CONSOLE="${RUN_PARENT}/${RUN_NAME}.console.log"
@@ -13,6 +15,14 @@ cd "${ROOT}"
 
 if [[ ! -x "${PYTHON}" ]]; then
   echo "Missing ${PYTHON}; run scripts/bootstrap_gpu.sh first." >&2
+  exit 1
+fi
+if [[ ! "${SMOKE_ACTORS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SMOKE_ACTORS must be a positive integer." >&2
+  exit 1
+fi
+if [[ ! "${SMOKE_SIMULATIONS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SMOKE_SIMULATIONS must be a positive integer." >&2
   exit 1
 fi
 if [[ -e "${RUN_DIR}" || -e "${CONSOLE}" ]]; then
@@ -32,9 +42,9 @@ env \
     --run-dir "${RUN_DIR}" \
     --max-steps 2 \
     --checkpoint-freq 1 \
-    --actors 1 \
+    --actors "${SMOKE_ACTORS}" \
     --evaluators 0 \
-    --max-simulations 4 \
+    --max-simulations "${SMOKE_SIMULATIONS}" \
     --train-batch-size 8 \
     --replay-buffer-size 32 \
     --replay-buffer-reuse 4 \
@@ -51,11 +61,16 @@ env \
   echo "Missing or empty learner.jsonl" >&2
   exit 1
 }
-compgen -G "${RUN_DIR}/log-actor-*.txt" >/dev/null || {
+mapfile -t ACTOR_LOGS < <(compgen -G "${RUN_DIR}/log-actor-*.txt" | sort)
+if [[ "${#ACTOR_LOGS[@]}" -ne "${SMOKE_ACTORS}" ]]; then
+  echo "Expected ${SMOKE_ACTORS} actor logs, found ${#ACTOR_LOGS[@]}" >&2
+  exit 1
+fi
+if [[ "${#ACTOR_LOGS[@]}" -eq 0 ]]; then
   echo "No actor log was written" >&2
   exit 1
-}
-grep -q 'Game [0-9][0-9]*: Returns:' "${RUN_DIR}"/log-actor-*.txt || {
+fi
+grep -q 'Game [0-9][0-9]*: Returns:' "${ACTOR_LOGS[@]}" || {
   echo "Actor log contains no completed self-play game" >&2
   exit 1
 }
@@ -75,5 +90,5 @@ for row in rows:
 print(f"Smoke learner steps: {len(rows)}; final step: {rows[-1]['step']}")
 PY
 
+echo "Smoke actors: ${SMOKE_ACTORS}; simulations: ${SMOKE_SIMULATIONS}"
 echo "GPU smoke passed: ${RUN_DIR}"
-

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${ROOT}/.venv/bin/python"
-RUN_NAME="${RUN_NAME:-az_resnet_w64_d3_s64_run0}"
+RUN_NAME="${RUN_NAME:-az_resnet_w64_d3_s64_a16_run0}"
 RUN_PARENT="${ROOT}/runs/connect3"
 RUN_DIR="${RUN_PARENT}/${RUN_NAME}"
 CONSOLE="${RUN_PARENT}/${RUN_NAME}.console.log"
@@ -37,7 +37,7 @@ COMMAND=(
   --run-dir "${RUN_DIR}"
   --max-steps 200
   --checkpoint-freq 20
-  --actors 4
+  --actors 16
   --evaluators 0
   --max-simulations 64
   --train-batch-size 512

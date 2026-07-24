@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_NAME="${RUN_NAME:-az_resnet_w64_d3_s64_run0}"
+RUN_NAME="${RUN_NAME:-az_resnet_w64_d3_s64_a16_run0}"
 RUN_PARENT="${ROOT}/runs/connect3"
 RUN_DIR="${RUN_PARENT}/${RUN_NAME}"
 CONSOLE="${RUN_PARENT}/${RUN_NAME}.console.log"
@@ -65,4 +65,3 @@ if [[ -r "${CONSOLE}" ]]; then
 else
   echo "console log not written yet"
 fi
-

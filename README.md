@@ -62,7 +62,7 @@ partial or failed installation.
 ## 3. GPU smoke test
 
 ```bash
-bash scripts/run_gpu_smoke.sh
+SMOKE_ACTORS=16 SMOKE_SIMULATIONS=64 bash scripts/run_gpu_smoke.sh
 ```
 
 Every invocation uses a new UTC-stamped `runs/connect3/gpu-smoke-*` directory.
@@ -81,7 +81,7 @@ bash scripts/launch_run0.sh
 The formal configuration is fixed to:
 
 - ResNet width 64, depth 3
-- 4 actors, 0 evaluators
+- 16 actors, 0 evaluators
 - 64 MCTS simulations per move
 - batch size 512
 - replay buffer 8192, replay reuse 4
@@ -91,12 +91,12 @@ The formal configuration is fixed to:
 The process is launched with `nohup`. Important files:
 
 ```text
-runs/connect3/az_resnet_w64_d3_s64_run0.pid
-runs/connect3/az_resnet_w64_d3_s64_run0.console.log
-runs/connect3/az_resnet_w64_d3_s64_run0.launch.txt
-runs/connect3/az_resnet_w64_d3_s64_run0.resource.csv
-runs/connect3/az_resnet_w64_d3_s64_run0.resource.log
-runs/connect3/az_resnet_w64_d3_s64_run0/
+runs/connect3/az_resnet_w64_d3_s64_a16_run0.pid
+runs/connect3/az_resnet_w64_d3_s64_a16_run0.console.log
+runs/connect3/az_resnet_w64_d3_s64_a16_run0.launch.txt
+runs/connect3/az_resnet_w64_d3_s64_a16_run0.resource.csv
+runs/connect3/az_resnet_w64_d3_s64_a16_run0.resource.log
+runs/connect3/az_resnet_w64_d3_s64_a16_run0/
 ```
 
 The launch script refuses to overwrite any of these paths.
@@ -127,10 +127,10 @@ This verifies the pre-specified checkpoints 20, 100, and 200 using plies
 6--10 and at most 1000 mirror-deduplicated states, then creates:
 
 ```text
-runs/connect3/az_resnet_w64_d3_s64_run0/verification-checkpoint-20.json
-runs/connect3/az_resnet_w64_d3_s64_run0/verification-checkpoint-100.json
-runs/connect3/az_resnet_w64_d3_s64_run0/verification-checkpoint-200.json
-runs/connect3/az_resnet_w64_d3_s64_run0/training_states.json
+runs/connect3/az_resnet_w64_d3_s64_a16_run0/verification-checkpoint-20.json
+runs/connect3/az_resnet_w64_d3_s64_a16_run0/verification-checkpoint-100.json
+runs/connect3/az_resnet_w64_d3_s64_a16_run0/verification-checkpoint-200.json
+runs/connect3/az_resnet_w64_d3_s64_a16_run0/training_states.json
 ```
 
 The verification sample is only a critic sanity check, not the final benchmark
