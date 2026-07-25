@@ -1,15 +1,16 @@
-# Connect-3 AlphaZero critic: A100 run bundle
+# Connect-3 AlphaZero critic: GPU run bundle
 
 This repository contains only the code needed to train and verify the
-OpenSpiel 4x4 Connect-3 critic:
+OpenSpiel 4x4 Connect-3 critic and run its experimental 2FFS versus BAI-MCTS
+comparison:
 
 ```text
 connect_four(rows=4,columns=4,x_in_row=3)
 ```
 
-It does not contain the paper, theory code, 2FFS, MCTS-BAI, or unrelated
-benchmarks. OpenSpiel and its required C++ dependencies are downloaded at
-fixed revisions through `gh-proxy.com`.
+It does not contain the paper, theory code, or unrelated benchmarks. OpenSpiel
+and its required C++ dependencies are downloaded at fixed revisions through
+`gh-proxy.com`.
 
 ## Fixed versions
 
@@ -18,8 +19,8 @@ fixed revisions through `gh-proxy.com`.
 - AlphaZero Python dependencies: see
   `benchmark/connect3/requirements-alpha-zero.txt`
 
-The setup expects Ubuntu/Debian, one NVIDIA A100, an NVIDIA driver supporting
-CUDA 12, and Python 3.11--3.13.
+The setup expects Ubuntu/Debian, an NVIDIA GPU with a driver supporting CUDA
+12, and Python 3.11--3.13.
 
 ## 1. Download on the GPU node
 
@@ -137,3 +138,33 @@ The verification sample is only a critic sanity check, not the final benchmark
 test split. A later calibration/test splitter must reject any root whose
 canonical descendant closure intersects `training_states.json`, thereby
 excluding training-state mirrors, transpositions, and descendants.
+
+## 7. Exploratory checkpoint comparison
+
+Checkpoint 60 may be used for an early engineering check while training
+continues:
+
+```bash
+bash scripts/launch_checkpoint60_comparison.sh
+bash scripts/status_checkpoint_comparison.sh
+```
+
+This runs at nice level 10 with `JAX_PLATFORMS=cpu`, so loading the critic does
+not reserve GPU memory or contend with the ongoing learner. Defaults are:
+
+- 3 deterministic Connect-3 roots selected from plies 6--10;
+- explicit planning depth 3;
+- finite-budget MCTS slow oracle with 16 simulations per query;
+- an empirical depth envelope made from up to 1000 calibration states;
+- calibration excludes the full mirror/transposition-canonical descendant
+  closure of every comparison root;
+- one replicate and at most 1000 rounds per method/root.
+
+The adapter writes every tree, per-run JSONL results, the full console log, PID,
+launch command, and `summary.json` under a new UTC-stamped directory in
+`runs/connect3/comparisons/`. It never overwrites an earlier comparison.
+
+This checkpoint-60 result is explicitly exploratory. It does not replace the
+pre-specified critic levels 20/100/200, and it is not the final benchmark test
+split because the complete training-state exclusion is only available after
+the formal run finishes.
