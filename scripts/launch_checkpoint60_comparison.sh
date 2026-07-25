@@ -32,16 +32,22 @@ for path in "${OUT_DIR}" "${CONSOLE}" "${PID_FILE}" "${LAUNCH_FILE}"; do
 done
 mkdir -p "${OUT_PARENT}"
 
+read -r -a ROOT_PLIES <<< "${COMPARE_ROOT_PLIES:-6 7 8 9 10}"
+read -r -a CALIBRATION_PLIES <<< \
+  "${COMPARE_CALIBRATION_PLIES:-6 7 8 9 10 11 12 13}"
+
 COMMAND=(
   nice -n 10
   "${PYTHON}" benchmark/connect3/compare_checkpoint.py
   --run-dir "${RUN_DIR}"
   --checkpoint-step "${CHECKPOINT_STEP}"
   --out-dir "${OUT_DIR}"
-  --root-plies 6 7 8 9 10
+  --root-plies "${ROOT_PLIES[@]}"
   --root-count "${COMPARE_ROOTS:-3}"
   --planning-depth "${COMPARE_DEPTH:-3}"
-  --calibration-plies 6 7 8 9 10 11 12 13
+  --max-terminal-leaf-fraction "${COMPARE_MAX_TERMINAL_FRACTION:-1.0}"
+  --min-nonterminal-leaves "${COMPARE_MIN_NONTERMINAL_LEAVES:-0}"
+  --calibration-plies "${CALIBRATION_PLIES[@]}"
   --calibration-states "${COMPARE_CALIBRATION_STATES:-1000}"
   --envelope-margin "${COMPARE_ENVELOPE_MARGIN:-0.05}"
   --slow-simulations "${COMPARE_SLOW_SIMULATIONS:-16}"

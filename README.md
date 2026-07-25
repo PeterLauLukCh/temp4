@@ -165,6 +165,11 @@ The adapter writes every tree, per-run JSONL results, the full console log, PID,
 launch command, and `summary.json` under a new UTC-stamped directory in
 `runs/connect3/comparisons/`. It never overwrites an earlier comparison.
 
+For depth/structure pilots, the launcher also accepts
+`COMPARE_ROOT_PLIES`, `COMPARE_DEPTH`, `COMPARE_MAX_TERMINAL_FRACTION`, and
+`COMPARE_MIN_NONTERMINAL_LEAVES`. The structural filters are applied before
+the method runs and their candidate counts are recorded in `summary.json`.
+
 This checkpoint-60 result is explicitly exploratory. It does not replace the
 pre-specified critic levels 20/100/200, and it is not the final benchmark test
 split because the complete training-state exclusion is only available after

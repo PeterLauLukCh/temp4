@@ -39,7 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 2
+ADAPTER_REVISION = 3
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +50,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root-plies", type=int, nargs="+", default=[6, 7, 8, 9, 10])
     parser.add_argument("--root-count", type=int, default=3)
     parser.add_argument("--planning-depth", type=int, default=3)
+    parser.add_argument("--max-terminal-leaf-fraction", type=float, default=1.0)
+    parser.add_argument("--min-nonterminal-leaves", type=int, default=0)
     parser.add_argument("--calibration-plies", type=int, nargs="+", default=list(range(6, 14)))
     parser.add_argument("--calibration-states", type=int, default=1000)
     parser.add_argument("--envelope-margin", type=float, default=0.05)
@@ -83,6 +85,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--epsilon must be nonnegative")
     if args.envelope_margin < 0:
         raise ValueError("--envelope-margin must be nonnegative")
+    if not 0 <= args.max_terminal_leaf_fraction <= 1:
+        raise ValueError("--max-terminal-leaf-fraction must lie in [0, 1]")
+    if args.min_nonterminal_leaves < 0:
+        raise ValueError("--min-nonterminal-leaves must be nonnegative")
     for label, plies in (
         ("root", args.root_plies),
         ("calibration", args.calibration_plies),
@@ -238,21 +244,60 @@ class CheckpointPredictor:
 
 def select_roots(
     layers: list[list[Any]],
+    states: dict[str, Any],
     exact_player0: Any,
     plies: list[int],
     count: int,
+    planning_depth: int,
+    max_terminal_leaf_fraction: float,
+    min_nonterminal_leaves: int,
     rng: random.Random,
-) -> list[Any]:
-    candidates: list[Any] = []
+) -> tuple[list[Any], dict[str, Any]]:
+    @functools.lru_cache(maxsize=None)
+    def frontier_profile(key: str, remaining: int) -> tuple[int, int]:
+        state = states[key]
+        if state.is_terminal():
+            return 1, 1
+        if remaining == 0:
+            return 1, 0
+        leaf_count = 0
+        terminal_leaf_count = 0
+        for action in state.legal_actions():
+            child_leaves, child_terminals = frontier_profile(
+                str(state.child(action)), remaining - 1
+            )
+            leaf_count += child_leaves
+            terminal_leaf_count += child_terminals
+        return leaf_count, terminal_leaf_count
+
+    candidates: list[tuple[Any, dict[str, Any]]] = []
     seen = set()
+    counters = {
+        "nonterminal_with_multiple_actions": 0,
+        "mirror_deduplicated": 0,
+        "passed_structure_filter": 0,
+        "unique_best_action": 0,
+    }
     for ply in plies:
         for state in layers[ply]:
             if state.is_terminal() or len(state.legal_actions()) < 2:
                 continue
+            counters["nonterminal_with_multiple_actions"] += 1
             canonical = canonical_board(str(state))
             if canonical in seen:
                 continue
             seen.add(canonical)
+            counters["mirror_deduplicated"] += 1
+            leaf_count, terminal_leaf_count = frontier_profile(
+                str(state), planning_depth
+            )
+            nonterminal_leaf_count = leaf_count - terminal_leaf_count
+            terminal_fraction = terminal_leaf_count / leaf_count
+            if terminal_fraction > max_terminal_leaf_fraction:
+                continue
+            if nonterminal_leaf_count < min_nonterminal_leaves:
+                continue
+            counters["passed_structure_filter"] += 1
             root_player = state.current_player()
             sign = 1.0 if root_player == 0 else -1.0
             child_values = [
@@ -265,14 +310,35 @@ def select_roots(
             ordered = sorted(child_values, reverse=True)
             if ordered[0] <= ordered[1]:
                 continue
-            candidates.append(state)
+            counters["unique_best_action"] += 1
+            candidates.append(
+                (
+                    state,
+                    {
+                        "leaf_count": leaf_count,
+                        "terminal_leaf_count": terminal_leaf_count,
+                        "nonterminal_leaf_count": nonterminal_leaf_count,
+                        "terminal_leaf_fraction": terminal_fraction,
+                    },
+                )
+            )
     rng.shuffle(candidates)
     if len(candidates) < count:
         raise RuntimeError(
-            f"Only {len(candidates)} nonterminal roots with a unique best move "
-            f"were available; requested {count}"
+            f"Only {len(candidates)} roots passed the structural filters and "
+            f"had a unique best move; requested {count}. Selection counters: "
+            f"{counters}"
         )
-    return candidates[:count]
+    selected = candidates[:count]
+    return [state for state, _ in selected], {
+        "root_plies": plies,
+        "planning_depth": planning_depth,
+        "max_terminal_leaf_fraction": max_terminal_leaf_fraction,
+        "min_nonterminal_leaves": min_nonterminal_leaves,
+        "candidate_counters": counters,
+        "eligible_roots": len(candidates),
+        "selected_profiles": [profile for _, profile in selected],
+    }
 
 
 def calibrate_envelope(
@@ -658,11 +724,15 @@ def main() -> None:
         return max(values) if state.current_player() == 0 else min(values)
 
     rng = random.Random(args.seed)
-    roots = select_roots(
+    roots, root_selection = select_roots(
         layers,
+        states,
         exact_player0,
         args.root_plies,
         args.root_count,
+        args.planning_depth,
+        args.max_terminal_leaf_fraction,
+        args.min_nonterminal_leaves,
         rng,
     )
     excluded = descendants_canonical(roots)
@@ -805,6 +875,8 @@ def main() -> None:
             "root_plies": args.root_plies,
             "root_count": args.root_count,
             "planning_depth": args.planning_depth,
+            "max_terminal_leaf_fraction": args.max_terminal_leaf_fraction,
+            "min_nonterminal_leaves": args.min_nonterminal_leaves,
             "calibration_plies": args.calibration_plies,
             "calibration_states": args.calibration_states,
             "envelope_margin": args.envelope_margin,
@@ -821,6 +893,7 @@ def main() -> None:
             "terminal_payoffs": "known exactly at zero query cost for both methods",
         },
         "calibration": calibration,
+        "root_selection": root_selection,
         "envelope_diagnostics_on_comparison_nodes": diagnostics,
         "roots": [
             {

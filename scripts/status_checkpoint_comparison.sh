@@ -63,6 +63,7 @@ print(json.dumps({
     "checkpoint_step": payload["checkpoint_step"],
     "jax_backend": payload["jax_backend"],
     "terminal_payoffs": payload["config"].get("terminal_payoffs"),
+    "root_selection": payload.get("root_selection"),
     "roots": payload["roots"],
     "envelope_diagnostics": payload["envelope_diagnostics_on_comparison_nodes"],
     "summary": payload["summary"],
