@@ -155,6 +155,7 @@ not reserve GPU memory or contend with the ongoing learner. Defaults are:
 - 3 deterministic Connect-3 roots selected from plies 6--10;
 - explicit planning depth 3;
 - finite-budget MCTS slow oracle with 16 simulations per query;
+- terminal utilities are known exactly at zero query cost for both methods;
 - an empirical depth envelope made from up to 1000 calibration states;
 - calibration excludes the full mirror/transposition-canonical descendant
   closure of every comparison root;

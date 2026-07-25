@@ -39,6 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
+ADAPTER_REVISION = 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -463,31 +464,33 @@ class FiniteBudgetMCTSOracle:
         started = time.perf_counter()
         state = self.state_for(node_id)
         if state.is_terminal():
-            value = float(state.returns()[self.root_player])
-        else:
-            evaluator = self.mcts.RandomRolloutEvaluator(
-                n_rollouts=1, random_state=self.random_state
+            raise RuntimeError(
+                "Terminal payoffs are known exactly and must not be sent to "
+                "the finite-budget MCTS oracle"
             )
-            bot = self.mcts.MCTSBot(
-                self.game,
-                self.uct_c,
-                self.simulations,
-                evaluator,
-                solve=False,
-                random_state=self.random_state,
+        evaluator = self.mcts.RandomRolloutEvaluator(
+            n_rollouts=1, random_state=self.random_state
+        )
+        bot = self.mcts.MCTSBot(
+            self.game,
+            self.uct_c,
+            self.simulations,
+            evaluator,
+            solve=False,
+            random_state=self.random_state,
+        )
+        root = bot.mcts_search(state)
+        if root.explore_count != self.simulations:
+            raise RuntimeError(
+                f"MCTS ran {root.explore_count} simulations, expected "
+                f"{self.simulations}"
             )
-            root = bot.mcts_search(state)
-            if root.explore_count != self.simulations:
-                raise RuntimeError(
-                    f"MCTS ran {root.explore_count} simulations, expected "
-                    f"{self.simulations}"
-                )
-            current_player_value = float(root.total_reward / root.explore_count)
-            value = (
-                current_player_value
-                if state.current_player() == self.root_player
-                else -current_player_value
-            )
+        current_player_value = float(root.total_reward / root.explore_count)
+        value = (
+            current_player_value
+            if state.current_player() == self.root_player
+            else -current_player_value
+        )
         if not -1.000001 <= value <= 1.000001:
             raise FloatingPointError(f"MCTS value outside [-1, 1]: {value}")
         self.num_calls += 1
@@ -504,9 +507,28 @@ class Connect3TwoFFSRunner(TwoFFSRunner):
     ) -> None:
         self.oracle = oracle
         super().__init__(tree, config)
+        nonterminal_nonroot = sum(
+            node["id"] != self.root and not node["terminal"]
+            for node in tree["nodes"]
+        )
+        self.node_delta = self.config.delta / max(1, nonterminal_nonroot)
 
     def draw_slow_sample(self, node_id: str) -> float:
         return self.oracle.sample(node_id)
+
+    def expose_node(self, node_id: str) -> None:
+        node = self.nodes[node_id]
+        if not node["terminal"]:
+            super().expose_node(node_id)
+            return
+        if node_id in self.explored:
+            return
+        self.explored.add(node_id)
+        value = float(node["value"])
+        st = self.state[node_id]
+        st.fast_l = value
+        st.fast_u = value
+        self.interval_write_touches()
 
 
 class Connect3MCTSBAIRunner(MCTSBAIRunner):
@@ -518,9 +540,24 @@ class Connect3MCTSBAIRunner(MCTSBAIRunner):
     ) -> None:
         self.oracle = oracle
         super().__init__(tree, config)
+        nonterminal_leaves = sum(
+            not self.nodes[leaf]["terminal"] for leaf in self.leaves
+        )
+        self.leaf_delta = self.config.delta / max(1, nonterminal_leaves)
 
     def draw_slow_sample(self, leaf: str) -> float:
         return self.oracle.sample(leaf)
+
+    def sample_leaf(self, leaf: str) -> None:
+        node = self.nodes[leaf]
+        if not node["terminal"]:
+            super().sample_leaf(leaf)
+            return
+        st = self.stats[leaf]
+        value = float(node["value"])
+        st.low = value
+        st.high = value
+        self.interval_write_touches()
 
 
 def envelope_diagnostics(
@@ -706,6 +743,12 @@ def main() -> None:
                 started = time.perf_counter()
                 result = runner_type(tree, method_config, oracle).run().to_dict()
                 elapsed = time.perf_counter() - started
+                if oracle.num_calls != result["num_slow_queries"]:
+                    raise RuntimeError(
+                        "Slow-query accounting mismatch: "
+                        f"oracle={oracle.num_calls}, result="
+                        f"{result['num_slow_queries']}"
+                    )
                 record = {
                     **result,
                     "method": method,
@@ -746,6 +789,7 @@ def main() -> None:
     payload = {
         "status": "complete",
         "exploratory": True,
+        "adapter_revision": ADAPTER_REVISION,
         "warning": (
             "Checkpoint 60 is not a pre-specified critic-quality level and this "
             "comparison is not the final overlap-filtered benchmark split."
@@ -774,6 +818,7 @@ def main() -> None:
             "slow_cost_units": "MCTS simulations",
             "fast_cost_per_query": 1.0,
             "slow_sigma": 1.0,
+            "terminal_payoffs": "known exactly at zero query cost for both methods",
         },
         "calibration": calibration,
         "envelope_diagnostics_on_comparison_nodes": diagnostics,
@@ -785,6 +830,10 @@ def main() -> None:
                 "root_gap": tree["root_gap"],
                 "node_count": tree["node_count"],
                 "leaf_count": tree["leaf_count"],
+                "terminal_leaf_count": sum(
+                    node["player"] == "leaf" and node["terminal"]
+                    for node in tree["nodes"]
+                ),
             }
             for tree in trees
         ],
