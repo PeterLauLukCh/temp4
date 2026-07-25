@@ -774,6 +774,9 @@ def aggregate(records: list[dict[str, Any]]) -> dict[str, Any]:
             "mean_slow_oracle_seconds": statistics.fmean(
                 row["slow_oracle_seconds"] for row in rows
             ),
+            "mean_exact_terminal_critical_fallbacks": statistics.fmean(
+                row["exact_terminal_critical_fallbacks"] for row in rows
+            ),
         }
     return summaries
 
