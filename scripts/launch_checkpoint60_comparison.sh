@@ -49,6 +49,7 @@ COMMAND=(
   --min-nonterminal-leaves "${COMPARE_MIN_NONTERMINAL_LEAVES:-0}"
   --calibration-plies "${CALIBRATION_PLIES[@]}"
   --calibration-states "${COMPARE_CALIBRATION_STATES:-1000}"
+  --envelope-quantile "${COMPARE_ENVELOPE_QUANTILE:-1.0}"
   --envelope-margin "${COMPARE_ENVELOPE_MARGIN:-0.05}"
   --slow-simulations "${COMPARE_SLOW_SIMULATIONS:-16}"
   --uct-c 1.41
@@ -58,6 +59,9 @@ COMMAND=(
   --max-rounds "${COMPARE_MAX_ROUNDS:-1000}"
   --seed 20260724
 )
+if [[ "${COMPARE_MIRROR_AVERAGE:-0}" == "1" ]]; then
+  COMMAND+=(--mirror-average)
+fi
 
 {
   echo "launch_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

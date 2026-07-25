@@ -169,6 +169,10 @@ For depth/structure pilots, the launcher also accepts
 `COMPARE_ROOT_PLIES`, `COMPARE_DEPTH`, `COMPARE_MAX_TERMINAL_FRACTION`, and
 `COMPARE_MIN_NONTERMINAL_LEAVES`. The structural filters are applied before
 the method runs and their candidate counts are recorded in `summary.json`.
+`COMPARE_ENVELOPE_QUANTILE` selects an empirical per-depth residual quantile
+(the default `1.0` is the original maximum), while
+`COMPARE_MIRROR_AVERAGE=1` averages the critic over a state and its horizontal
+mirror and charges two fast queries per exposed node.
 
 This checkpoint-60 result is explicitly exploratory. It does not replace the
 pre-specified critic levels 20/100/200, and it is not the final benchmark test

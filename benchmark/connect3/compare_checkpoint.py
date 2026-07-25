@@ -39,7 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 3
+ADAPTER_REVISION = 4
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,7 +54,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-nonterminal-leaves", type=int, default=0)
     parser.add_argument("--calibration-plies", type=int, nargs="+", default=list(range(6, 14)))
     parser.add_argument("--calibration-states", type=int, default=1000)
+    parser.add_argument("--envelope-quantile", type=float, default=1.0)
     parser.add_argument("--envelope-margin", type=float, default=0.05)
+    parser.add_argument("--mirror-average", action="store_true")
     parser.add_argument("--slow-simulations", type=int, default=16)
     parser.add_argument("--uct-c", type=float, default=1.41)
     parser.add_argument("--delta", type=float, default=0.05)
@@ -85,6 +87,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--epsilon must be nonnegative")
     if args.envelope_margin < 0:
         raise ValueError("--envelope-margin must be nonnegative")
+    if not 0 < args.envelope_quantile <= 1:
+        raise ValueError("--envelope-quantile must lie in (0, 1]")
     if not 0 <= args.max_terminal_leaf_fraction <= 1:
         raise ValueError("--max-terminal-leaf-fraction must lie in [0, 1]")
     if args.min_nonterminal_leaves < 0:
@@ -225,19 +229,41 @@ def descendants_canonical(roots: Iterable[Any]) -> set[str]:
 
 
 class CheckpointPredictor:
-    def __init__(self, model: Any) -> None:
+    def __init__(self, model: Any, game: Any, mirror_average: bool) -> None:
         self.model = model
+        self.game = game
+        self.mirror_average = mirror_average
+        self.raw_cache: dict[str, float] = {}
         self.cache: dict[str, float] = {}
 
-    def __call__(self, state: Any) -> float:
+    def raw_prediction(self, state: Any) -> float:
         key = str(state)
-        if key not in self.cache:
+        if key not in self.raw_cache:
             value, _ = self.model.inference(
                 state.observation_tensor(), state.legal_actions_mask()
             )
             prediction = float(value)
             if not math.isfinite(prediction):
                 raise FloatingPointError(f"Non-finite critic value for state:\n{key}")
+            self.raw_cache[key] = prediction
+        return self.raw_cache[key]
+
+    def mirrored_state(self, state: Any) -> Any:
+        mirrored = self.game.new_initial_state()
+        max_action = self.game.num_distinct_actions() - 1
+        for action in state.history():
+            mirrored.apply_action(max_action - int(action))
+        return mirrored
+
+    def __call__(self, state: Any) -> float:
+        key = str(state)
+        if key not in self.cache:
+            prediction = self.raw_prediction(state)
+            if self.mirror_average:
+                mirrored = self.mirrored_state(state)
+                prediction = 0.5 * (
+                    prediction + self.raw_prediction(mirrored)
+                )
             self.cache[key] = prediction
         return self.cache[key]
 
@@ -349,6 +375,7 @@ def calibrate_envelope(
     plies: list[int],
     max_states: int,
     excluded: set[str],
+    quantile_probability: float,
     margin: float,
     rng: random.Random,
 ) -> tuple[dict[int, float], dict[str, Any]]:
@@ -376,13 +403,23 @@ def calibrate_envelope(
         by_depth[remaining].append(error)
         all_errors.append(error)
 
-    global_bound = min(2.0, max(all_errors) + margin)
+    def empirical_quantile(values: list[float]) -> float:
+        ordered = sorted(values)
+        index = round((len(ordered) - 1) * quantile_probability)
+        return ordered[index]
+
+    global_bound = (
+        min(2.0, max(all_errors) + margin)
+        if quantile_probability == 1.0
+        else 2.0
+    )
     bounds = {
-        depth: min(2.0, max(errors) + margin)
+        depth: min(2.0, empirical_quantile(errors) + margin)
         for depth, errors in by_depth.items()
     }
     details = {
-        "construction": "empirical per-depth maximum plus fixed margin",
+        "construction": "empirical per-depth quantile plus fixed margin",
+        "quantile": quantile_probability,
         "margin": margin,
         "num_states": len(sampled),
         "excluded_descendant_canonical_states": len(excluded),
@@ -394,7 +431,11 @@ def calibrate_envelope(
             str(depth): {
                 "count": len(errors),
                 "max_absolute_error": max(errors),
+                "selected_quantile": empirical_quantile(errors),
                 "bound": bounds[depth],
+                "empirical_coverage": statistics.fmean(
+                    float(error <= bounds[depth] + 1e-12) for error in errors
+                ),
             }
             for depth, errors in sorted(by_depth.items())
         },
@@ -412,6 +453,7 @@ def build_planning_tree(
     predictor: CheckpointPredictor,
     envelope: dict[int, float],
     slow_simulations: int,
+    fast_query_cost: float,
 ) -> dict[str, Any]:
     root_player = root_state.current_player()
     root_sign = 1.0 if root_player == 0 else -1.0
@@ -483,8 +525,8 @@ def build_planning_tree(
         "root_gap": ordered[0][1] - ordered[1][1],
         "fast_oracle": {
             "kind": "alpha_zero_checkpoint",
-            "cost": 1.0,
-            "envelope": "empirical_depth_max_plus_margin",
+            "cost": fast_query_cost,
+            "envelope": "empirical_depth_quantile_plus_margin",
         },
         "slow_oracle": {
             "kind": "finite_budget_open_spiel_mcts",
@@ -626,9 +668,7 @@ class Connect3MCTSBAIRunner(MCTSBAIRunner):
         self.interval_write_touches()
 
 
-def envelope_diagnostics(
-    trees: list[dict[str, Any]], predictor: CheckpointPredictor
-) -> dict[str, Any]:
+def envelope_diagnostics(trees: list[dict[str, Any]]) -> dict[str, Any]:
     records = []
     seen = set()
     for tree in trees:
@@ -653,6 +693,9 @@ def envelope_diagnostics(
                 }
             )
     violations = [record for record in records if not record["covered"]]
+    by_depth: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        by_depth[record["remaining_depth"]].append(record)
     return {
         "num_comparison_nodes": len(records),
         "num_violations": len(violations),
@@ -662,6 +705,22 @@ def envelope_diagnostics(
             (record["error"] - record["bound"] for record in violations),
             default=0.0,
         ),
+        "by_remaining_depth": {
+            str(depth): {
+                "count": len(depth_records),
+                "violations": sum(
+                    not record["covered"] for record in depth_records
+                ),
+                "coverage": statistics.fmean(
+                    float(record["covered"]) for record in depth_records
+                ),
+                "bound": depth_records[0]["bound"],
+                "max_absolute_error": max(
+                    record["error"] for record in depth_records
+                ),
+            }
+            for depth, depth_records in sorted(by_depth.items())
+        },
     }
 
 
@@ -739,7 +798,7 @@ def main() -> None:
 
     model = build_model(run_dir, config)
     model.load_checkpoint(args.checkpoint_step)
-    predictor = CheckpointPredictor(model)
+    predictor = CheckpointPredictor(model, game, args.mirror_average)
     envelope, calibration = calibrate_envelope(
         game,
         layers,
@@ -748,9 +807,11 @@ def main() -> None:
         args.calibration_plies,
         args.calibration_states,
         excluded,
+        args.envelope_quantile,
         args.envelope_margin,
         rng,
     )
+    fast_query_cost = 2.0 if args.mirror_average else 1.0
 
     trees = [
         build_planning_tree(
@@ -762,6 +823,7 @@ def main() -> None:
             predictor,
             envelope,
             args.slow_simulations,
+            fast_query_cost,
         )
         for index, root in enumerate(roots)
     ]
@@ -769,7 +831,7 @@ def main() -> None:
         tree_path = out_dir / "trees" / f"{tree['tree_id']}.json"
         tree_path.write_text(json.dumps(tree, indent=2, sort_keys=True) + "\n")
 
-    diagnostics = envelope_diagnostics(trees, predictor)
+    diagnostics = envelope_diagnostics(trees)
     records: list[dict[str, Any]] = []
     for tree_index, tree in enumerate(trees):
         for replicate in range(args.replicates):
@@ -861,8 +923,8 @@ def main() -> None:
         "exploratory": True,
         "adapter_revision": ADAPTER_REVISION,
         "warning": (
-            "Checkpoint 60 is not a pre-specified critic-quality level and this "
-            "comparison is not the final overlap-filtered benchmark split."
+            "This method comparison is exploratory and is not the final "
+            "training-overlap-filtered benchmark split."
         ),
         "run_dir": str(run_dir),
         "checkpoint_step": args.checkpoint_step,
@@ -879,7 +941,9 @@ def main() -> None:
             "min_nonterminal_leaves": args.min_nonterminal_leaves,
             "calibration_plies": args.calibration_plies,
             "calibration_states": args.calibration_states,
+            "envelope_quantile": args.envelope_quantile,
             "envelope_margin": args.envelope_margin,
+            "mirror_average": args.mirror_average,
             "slow_simulations": args.slow_simulations,
             "uct_c": args.uct_c,
             "delta": args.delta,
@@ -888,7 +952,7 @@ def main() -> None:
             "max_rounds": args.max_rounds,
             "seed": args.seed,
             "slow_cost_units": "MCTS simulations",
-            "fast_cost_per_query": 1.0,
+            "fast_cost_per_query": fast_query_cost,
             "slow_sigma": 1.0,
             "terminal_payoffs": "known exactly at zero query cost for both methods",
         },
