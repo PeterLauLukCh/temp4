@@ -174,6 +174,11 @@ the method runs and their candidate counts are recorded in `summary.json`.
 `COMPARE_MIRROR_AVERAGE=1` averages the critic over a state and its horizontal
 mirror and charges two fast queries per exposed node.
 
+Known terminal utilities remain free for both methods. If BAI-MCTS selects an
+exact terminal leaf that cannot shrink, the adapter records the event and
+falls back to the widest nonterminal leaf in the same subtree so the baseline
+cannot spend rounds on a no-op.
+
 This checkpoint-60 result is explicitly exploratory. It does not replace the
 pre-specified critic levels 20/100/200, and it is not the final benchmark test
 split because the complete training-state exclusion is only available after

@@ -39,7 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 4
+ADAPTER_REVISION = 5
 
 
 def parse_args() -> argparse.Namespace:
@@ -648,6 +648,7 @@ class Connect3MCTSBAIRunner(MCTSBAIRunner):
     ) -> None:
         self.oracle = oracle
         super().__init__(tree, config)
+        self.exact_terminal_critical_fallbacks = 0
         nonterminal_leaves = sum(
             not self.nodes[leaf]["terminal"] for leaf in self.leaves
         )
@@ -666,6 +667,32 @@ class Connect3MCTSBAIRunner(MCTSBAIRunner):
         st.low = value
         st.high = value
         self.interval_write_touches()
+
+    @functools.lru_cache(maxsize=None)
+    def nonterminal_descendant_leaves(self, node_id: str) -> tuple[str, ...]:
+        node = self.nodes[node_id]
+        if node["player"] == "leaf":
+            return () if node["terminal"] else (node_id,)
+        leaves: list[str] = []
+        for child in node["children"]:
+            leaves.extend(self.nonterminal_descendant_leaves(child))
+        return tuple(leaves)
+
+    def critical_leaf(self, node_id: str, side: str) -> str:
+        leaf = super().critical_leaf(node_id, side)
+        if not self.nodes[leaf]["terminal"]:
+            return leaf
+        candidates = self.nonterminal_descendant_leaves(node_id)
+        if not candidates:
+            return leaf
+        self.exact_terminal_critical_fallbacks += 1
+        self.scan_touches(len(candidates))
+        return max(
+            candidates,
+            key=lambda candidate: (
+                self.stats[candidate].high - self.stats[candidate].low
+            ),
+        )
 
 
 def envelope_diagnostics(trees: list[dict[str, Any]]) -> dict[str, Any]:
@@ -873,7 +900,8 @@ def main() -> None:
                     base_seed + 10_000 * method_index,
                 )
                 started = time.perf_counter()
-                result = runner_type(tree, method_config, oracle).run().to_dict()
+                runner = runner_type(tree, method_config, oracle)
+                result = runner.run().to_dict()
                 elapsed = time.perf_counter() - started
                 if oracle.num_calls != result["num_slow_queries"]:
                     raise RuntimeError(
@@ -893,6 +921,9 @@ def main() -> None:
                     "slow_simulations_per_query": args.slow_simulations,
                     "wall_seconds": elapsed,
                     "slow_oracle_seconds": oracle.wall_seconds,
+                    "exact_terminal_critical_fallbacks": getattr(
+                        runner, "exact_terminal_critical_fallbacks", 0
+                    ),
                     "exploratory": True,
                 }
                 records.append(record)
