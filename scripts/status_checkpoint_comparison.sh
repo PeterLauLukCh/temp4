@@ -59,8 +59,11 @@ payload = json.load(open(sys.argv[1]))
 print(json.dumps({
     "status": payload["status"],
     "exploratory": payload["exploratory"],
+    "adapter_revision": payload.get("adapter_revision"),
     "checkpoint_step": payload["checkpoint_step"],
     "jax_backend": payload["jax_backend"],
+    "terminal_payoffs": payload["config"].get("terminal_payoffs"),
+    "roots": payload["roots"],
     "envelope_diagnostics": payload["envelope_diagnostics_on_comparison_nodes"],
     "summary": payload["summary"],
     "wall_seconds": payload["wall_seconds"],
