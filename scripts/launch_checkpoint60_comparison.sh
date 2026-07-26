@@ -33,8 +33,7 @@ done
 mkdir -p "${OUT_PARENT}"
 
 read -r -a ROOT_PLIES <<< "${COMPARE_ROOT_PLIES:-6 7 8 9 10}"
-read -r -a CALIBRATION_PLIES <<< \
-  "${COMPARE_CALIBRATION_PLIES:-6 7 8 9 10 11 12 13}"
+PROXY_ENVELOPE="${COMPARE_PROXY_ENVELOPE:-${COMPARE_PROXY_ENVELOP:-}}"
 
 COMMAND=(
   nice -n 10
@@ -47,10 +46,6 @@ COMMAND=(
   --planning-depth "${COMPARE_DEPTH:-3}"
   --max-terminal-leaf-fraction "${COMPARE_MAX_TERMINAL_FRACTION:-1.0}"
   --min-nonterminal-leaves "${COMPARE_MIN_NONTERMINAL_LEAVES:-0}"
-  --calibration-plies "${CALIBRATION_PLIES[@]}"
-  --calibration-states "${COMPARE_CALIBRATION_STATES:-1000}"
-  --envelope-quantile "${COMPARE_ENVELOPE_QUANTILE:-1.0}"
-  --envelope-margin "${COMPARE_ENVELOPE_MARGIN:-0.05}"
   --slow-simulations "${COMPARE_SLOW_SIMULATIONS:-16}"
   --uct-c 1.41
   --delta 0.05
@@ -59,6 +54,18 @@ COMMAND=(
   --max-rounds "${COMPARE_MAX_ROUNDS:-1000}"
   --seed 20260724
 )
+if [[ -n "${PROXY_ENVELOPE}" ]]; then
+  COMMAND+=(--proxy-envelope "${PROXY_ENVELOPE}")
+else
+  read -r -a CALIBRATION_PLIES <<< \
+    "${COMPARE_CALIBRATION_PLIES:-6 7 8 9 10 11 12 13}"
+  COMMAND+=(
+    --calibration-plies "${CALIBRATION_PLIES[@]}"
+    --calibration-states "${COMPARE_CALIBRATION_STATES:-1000}"
+    --envelope-quantile "${COMPARE_ENVELOPE_QUANTILE:-1.0}"
+    --envelope-margin "${COMPARE_ENVELOPE_MARGIN:-0.05}"
+  )
+fi
 if [[ "${COMPARE_MIRROR_AVERAGE:-0}" == "1" ]]; then
   COMMAND+=(--mirror-average)
 fi
@@ -69,6 +76,7 @@ fi
   echo "run_dir=${RUN_DIR}"
   echo "checkpoint_step=${CHECKPOINT_STEP}"
   echo "out_dir=${OUT_DIR}"
+  echo "proxy_envelope=${PROXY_ENVELOPE:-none}"
   echo "execution_device=cpu"
   printf 'command='
   printf '%q ' env \

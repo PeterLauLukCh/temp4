@@ -63,6 +63,11 @@ print(json.dumps({
     "checkpoint_step": payload["checkpoint_step"],
     "jax_backend": payload["jax_backend"],
     "terminal_payoffs": payload["config"].get("terminal_payoffs"),
+    "proxy_envelope": payload["config"].get("proxy_envelope"),
+    "envelope_construction": payload.get("calibration", {}).get("construction"),
+    "envelope_uses_reference_values": payload["config"].get(
+        "envelope_uses_reference_values"
+    ),
     "envelope_quantile": payload["config"].get("envelope_quantile"),
     "mirror_average": payload["config"].get("mirror_average"),
     "fast_cost_per_query": payload["config"].get("fast_cost_per_query"),

@@ -174,6 +174,47 @@ the method runs and their candidate counts are recorded in `summary.json`.
 `COMPARE_MIRROR_AVERAGE=1` averages the critic over a state and its horizontal
 mirror and charges two fast queries per exposed node.
 
+For a reference-free proxy that follows the original linear remaining-depth
+shape, set `COMPARE_PROXY_ENVELOPE=linear`. This skips residual calibration
+entirely and uses
+
+```text
+B_proxy(h) = 2 * h / 16
+```
+
+where 2 is the diameter of the `[-1, 1]` value range and 16 is the maximum
+Connect-3 game length. The proxy is fixed before evaluation and is not claimed
+to be a guaranteed critic-error bound. Exact minimax values remain available
+only for root construction, terminal utilities, post-run accuracy, and
+coverage diagnostics. The summary records
+`envelope_uses_reference_values=false` for this mode. The Python CLI accepts
+both `--proxy-envelope linear` and the compatibility alias
+`--proxy_envelop linear`.
+
+The following structured setting contains exactly 30 mirror/transposition-
+deduplicated roots with a unique best action:
+
+```bash
+OUT_NAME="exploratory-checkpoint-100-depth6-linear-proxy-all30-r1-$(date -u +%Y%m%dT%H%M%SZ)" \
+CHECKPOINT_STEP=100 \
+COMPARE_ROOT_PLIES="2 3 4 5 6" \
+COMPARE_ROOTS=30 \
+COMPARE_DEPTH=6 \
+COMPARE_MAX_TERMINAL_FRACTION=0.404 \
+COMPARE_MIN_NONTERMINAL_LEAVES=30 \
+COMPARE_PROXY_ENVELOPE=linear \
+COMPARE_MIRROR_AVERAGE=0 \
+COMPARE_REPLICATES=1 \
+COMPARE_SLOW_SIMULATIONS=64 \
+COMPARE_MAX_ROUNDS=5000 \
+bash scripts/launch_checkpoint60_comparison.sh
+```
+
+The `0.404` threshold is the smallest three-decimal relaxation of `0.400`
+that adds one eligible root: its terminal fraction is `293/726 =
+0.403581...`. Thus the 30-root set is the previous 29-root set plus exactly
+one root; the unique-best and minimum-nonterminal-leaf filters are unchanged.
+
 Known terminal utilities remain free for both methods. If BAI-MCTS selects an
 exact terminal leaf that cannot shrink, the adapter records the event and
 falls back to the widest nonterminal leaf in the same subtree so the baseline

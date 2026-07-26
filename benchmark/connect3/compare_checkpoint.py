@@ -39,7 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 5
+ADAPTER_REVISION = 6
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +56,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-states", type=int, default=1000)
     parser.add_argument("--envelope-quantile", type=float, default=1.0)
     parser.add_argument("--envelope-margin", type=float, default=0.05)
+    parser.add_argument(
+        "--proxy-envelope",
+        "--proxy_envelop",
+        dest="proxy_envelope",
+        choices=("linear",),
+        default=None,
+        help=(
+            "Reference-free envelope proxy. 'linear' uses "
+            "B_proxy(h)=2*h/game.max_game_length() and skips residual "
+            "calibration entirely."
+        ),
+    )
     parser.add_argument("--mirror-average", action="store_true")
     parser.add_argument("--slow-simulations", type=int, default=16)
     parser.add_argument("--uct-c", type=float, default=1.41)
@@ -444,6 +456,37 @@ def calibrate_envelope(
     return bounds, details
 
 
+def linear_proxy_envelope(game: Any) -> tuple[dict[int, float], dict[str, Any]]:
+    """Build a reference-free depth proxy from only range and horizon.
+
+    Connect-3 values lie in [-1, 1], so their maximum possible absolute
+    difference is 2. The proxy follows the synthetic benchmark's linear
+    remaining-depth shape without consulting critic residuals or minimax
+    values. It is a proxy, not a guaranteed nonterminal error bound.
+    """
+
+    horizon = int(game.max_game_length())
+    if horizon <= 0:
+        raise ValueError("game.max_game_length() must be positive")
+    value_range_diameter = 2.0
+    bounds = {
+        remaining: value_range_diameter * remaining / horizon
+        for remaining in range(horizon + 1)
+    }
+    bounds[-1] = value_range_diameter
+    return bounds, {
+        "construction": "reference-free linear remaining-horizon proxy",
+        "proxy": "linear",
+        "formula": f"B_proxy(h)=2*h/{horizon}",
+        "horizon": horizon,
+        "value_range": [-1.0, 1.0],
+        "value_range_diameter": value_range_diameter,
+        "uses_reference_values_for_envelope": False,
+        "num_states": 0,
+        "global_fallback_bound": value_range_diameter,
+    }
+
+
 def build_planning_tree(
     game: Any,
     root_state: Any,
@@ -829,18 +872,21 @@ def main() -> None:
     model = build_model(run_dir, config)
     model.load_checkpoint(args.checkpoint_step)
     predictor = CheckpointPredictor(model, game, args.mirror_average)
-    envelope, calibration = calibrate_envelope(
-        game,
-        layers,
-        exact_player0,
-        predictor,
-        args.calibration_plies,
-        args.calibration_states,
-        excluded,
-        args.envelope_quantile,
-        args.envelope_margin,
-        rng,
-    )
+    if args.proxy_envelope == "linear":
+        envelope, calibration = linear_proxy_envelope(game)
+    else:
+        envelope, calibration = calibrate_envelope(
+            game,
+            layers,
+            exact_player0,
+            predictor,
+            args.calibration_plies,
+            args.calibration_states,
+            excluded,
+            args.envelope_quantile,
+            args.envelope_margin,
+            rng,
+        )
     fast_query_cost = 2.0 if args.mirror_average else 1.0
 
     trees = [
@@ -973,10 +1019,22 @@ def main() -> None:
             "planning_depth": args.planning_depth,
             "max_terminal_leaf_fraction": args.max_terminal_leaf_fraction,
             "min_nonterminal_leaves": args.min_nonterminal_leaves,
-            "calibration_plies": args.calibration_plies,
-            "calibration_states": args.calibration_states,
-            "envelope_quantile": args.envelope_quantile,
-            "envelope_margin": args.envelope_margin,
+            "calibration_plies": (
+                None if args.proxy_envelope else args.calibration_plies
+            ),
+            "calibration_states": (
+                None if args.proxy_envelope else args.calibration_states
+            ),
+            "envelope_quantile": (
+                None if args.proxy_envelope else args.envelope_quantile
+            ),
+            "envelope_margin": (
+                None if args.proxy_envelope else args.envelope_margin
+            ),
+            "proxy_envelope": args.proxy_envelope,
+            "envelope_uses_reference_values": bool(
+                calibration.get("uses_reference_values_for_envelope", True)
+            ),
             "mirror_average": args.mirror_average,
             "slow_simulations": args.slow_simulations,
             "uct_c": args.uct_c,
