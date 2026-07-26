@@ -220,6 +220,11 @@ exact terminal leaf that cannot shrink, the adapter records the event and
 falls back to the widest nonterminal leaf in the same subtree so the baseline
 cannot spend rounds on a no-op.
 
+Follow-up runs execute only 2FFS by default because the corresponding BAI-MCTS
+statistics already exist. `COMPARE_METHODS=2ffs` can be set explicitly;
+running BAI-MCTS now requires explicitly including `bai_mcts`. The selected
+method list is recorded in `summary.json`.
+
 This checkpoint-60 result is explicitly exploratory. It does not replace the
 pre-specified critic levels 20/100/200, and it is not the final benchmark test
 split because the complete training-state exclusion is only available after

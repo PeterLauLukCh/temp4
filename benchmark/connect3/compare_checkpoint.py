@@ -39,7 +39,8 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 6
+ADAPTER_REVISION = 7
+METHODS = ("2ffs", "bai_mcts")
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,6 +77,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replicates", type=int, default=1)
     parser.add_argument("--max-rounds", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=20260724)
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        choices=METHODS,
+        default=["2ffs"],
+        help=(
+            "Methods to execute. Defaults to 2ffs so existing BAI-MCTS "
+            "statistics are not recomputed accidentally."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -105,6 +116,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-terminal-leaf-fraction must lie in [0, 1]")
     if args.min_nonterminal_leaves < 0:
         raise ValueError("--min-nonterminal-leaves must be nonnegative")
+    if len(set(args.methods)) != len(args.methods):
+        raise ValueError("--methods must not contain duplicates")
     for label, plies in (
         ("root", args.root_plies),
         ("calibration", args.calibration_plies),
@@ -941,6 +954,8 @@ def main() -> None:
             for method_index, (method, runner_type, method_config) in enumerate(
                 method_specs
             ):
+                if method not in args.methods:
+                    continue
                 oracle = FiniteBudgetMCTSOracle(
                     game,
                     tree,
@@ -1043,6 +1058,7 @@ def main() -> None:
             "replicates": args.replicates,
             "max_rounds": args.max_rounds,
             "seed": args.seed,
+            "methods": args.methods,
             "slow_cost_units": "MCTS simulations",
             "fast_cost_per_query": fast_query_cost,
             "slow_sigma": 1.0,

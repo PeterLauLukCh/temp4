@@ -62,6 +62,7 @@ print(json.dumps({
     "adapter_revision": payload.get("adapter_revision"),
     "checkpoint_step": payload["checkpoint_step"],
     "jax_backend": payload["jax_backend"],
+    "methods": payload["config"].get("methods"),
     "terminal_payoffs": payload["config"].get("terminal_payoffs"),
     "proxy_envelope": payload["config"].get("proxy_envelope"),
     "envelope_construction": payload.get("calibration", {}).get("construction"),

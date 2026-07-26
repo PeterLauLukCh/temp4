@@ -33,6 +33,7 @@ done
 mkdir -p "${OUT_PARENT}"
 
 read -r -a ROOT_PLIES <<< "${COMPARE_ROOT_PLIES:-6 7 8 9 10}"
+read -r -a METHODS <<< "${COMPARE_METHODS:-2ffs}"
 PROXY_ENVELOPE="${COMPARE_PROXY_ENVELOPE:-${COMPARE_PROXY_ENVELOP:-}}"
 
 COMMAND=(
@@ -53,6 +54,7 @@ COMMAND=(
   --replicates "${COMPARE_REPLICATES:-1}"
   --max-rounds "${COMPARE_MAX_ROUNDS:-1000}"
   --seed 20260724
+  --methods "${METHODS[@]}"
 )
 if [[ -n "${PROXY_ENVELOPE}" ]]; then
   COMMAND+=(--proxy-envelope "${PROXY_ENVELOPE}")
