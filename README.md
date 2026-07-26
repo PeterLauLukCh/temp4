@@ -174,19 +174,22 @@ the method runs and their candidate counts are recorded in `summary.json`.
 `COMPARE_MIRROR_AVERAGE=1` averages the critic over a state and its horizontal
 mirror and charges two fast queries per exposed node.
 
-For a reference-free proxy that follows the original linear remaining-depth
-shape, set `COMPARE_PROXY_ENVELOPE=linear`. This skips residual calibration
-entirely and uses
+For a reference-free proxy with a nonterminal floor, set
+`COMPARE_PROXY_ENVELOPE=linear`. This skips residual calibration entirely and
+uses
 
 ```text
-B_proxy(h) = 2 * h / 16
+B_proxy(0) = 0
+B_proxy(h) = 1 + (h - 1) / 15,  for 1 <= h <= 16
 ```
 
-where 2 is the diameter of the `[-1, 1]` value range and 16 is the maximum
-Connect-3 game length. The proxy is fixed before evaluation and is not claimed
-to be a guaranteed critic-error bound. Exact minimax values remain available
-only for root construction, terminal utilities, post-run accuracy, and
-coverage diagnostics. The summary records
+Thus the full-horizon bound is 2, the last nonterminal layer (`h=1`) has bound
+1, and the terminal layer (`h=0`) drops directly to 0. Here 2 is the diameter
+of the `[-1, 1]` value range and 16 is the maximum Connect-3 game length. The
+proxy is fixed before evaluation and is not claimed to be a guaranteed
+critic-error bound. Exact minimax values remain available only for root
+construction, terminal utilities, post-run accuracy, and coverage diagnostics.
+The summary records
 `envelope_uses_reference_values=false` for this mode. The Python CLI accepts
 both `--proxy-envelope linear` and the compatibility alias
 `--proxy_envelop linear`.

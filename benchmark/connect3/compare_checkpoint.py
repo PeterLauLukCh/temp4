@@ -39,7 +39,7 @@ from twoffs import TwoFFSConfig, TwoFFSRunner  # noqa: E402
 
 EXPECTED_GAME = "connect_four(rows=4,columns=4,x_in_row=3)"
 EXPECTED_OPEN_SPIEL_COMMIT = "112b77704631fc2ce7ad8e4581f6ca09798ce15a"
-ADAPTER_REVISION = 7
+ADAPTER_REVISION = 8
 METHODS = ("2ffs", "bai_mcts")
 
 
@@ -65,8 +65,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Reference-free envelope proxy. 'linear' uses "
-            "B_proxy(h)=2*h/game.max_game_length() and skips residual "
-            "calibration entirely."
+            "B_proxy(0)=0 and, for h>=1, decreases linearly from 2 at "
+            "the full horizon to 1 at the last nonterminal layer. It "
+            "skips residual calibration entirely."
         ),
     )
     parser.add_argument("--mirror-average", action="store_true")
@@ -473,27 +474,46 @@ def linear_proxy_envelope(game: Any) -> tuple[dict[int, float], dict[str, Any]]:
     """Build a reference-free depth proxy from only range and horizon.
 
     Connect-3 values lie in [-1, 1], so their maximum possible absolute
-    difference is 2. The proxy follows the synthetic benchmark's linear
-    remaining-depth shape without consulting critic residuals or minimax
-    values. It is a proxy, not a guaranteed nonterminal error bound.
+    difference is 2. For every nonterminal layer, the proxy decreases
+    linearly from 2 at the full horizon to 1 at h=1; the terminal layer
+    h=0 is exactly 0. It does not consult critic residuals or minimax values.
+    This is a proxy, not a guaranteed nonterminal error bound.
     """
 
     horizon = int(game.max_game_length())
     if horizon <= 0:
         raise ValueError("game.max_game_length() must be positive")
     value_range_diameter = 2.0
-    bounds = {
-        remaining: value_range_diameter * remaining / horizon
-        for remaining in range(horizon + 1)
-    }
+    bounds = {0: 0.0}
+    if horizon == 1:
+        bounds[1] = 1.0
+    else:
+        bounds.update(
+            {
+                remaining: 1.0 + (remaining - 1) / (horizon - 1)
+                for remaining in range(1, horizon + 1)
+            }
+        )
+    formula = (
+        "B_proxy(0)=0; B_proxy(1)=1"
+        if horizon == 1
+        else (
+            "B_proxy(0)=0; "
+            f"B_proxy(h)=1+(h-1)/({horizon}-1) for 1<=h<={horizon}"
+        )
+    )
     bounds[-1] = value_range_diameter
     return bounds, {
-        "construction": "reference-free linear remaining-horizon proxy",
+        "construction": (
+            "reference-free linear nonterminal-floor remaining-horizon proxy"
+        ),
         "proxy": "linear",
-        "formula": f"B_proxy(h)=2*h/{horizon}",
+        "formula": formula,
         "horizon": horizon,
         "value_range": [-1.0, 1.0],
         "value_range_diameter": value_range_diameter,
+        "terminal_bound": bounds[0],
+        "last_nonterminal_bound": bounds[1],
         "uses_reference_values_for_envelope": False,
         "num_states": 0,
         "global_fallback_bound": value_range_diameter,
